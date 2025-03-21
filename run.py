@@ -1,10 +1,5 @@
-"""Run the FastAPI application with uvicorn server."""
-import uvicorn
+"""Run the aiohttp application server."""
+from app.main import run_app
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-    )
+    run_app()

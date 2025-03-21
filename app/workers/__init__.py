@@ -1,1 +1,1 @@
-"""Worker package for handling long-running tasks."""
+"""Workers package for long-running tasks."""

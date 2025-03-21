@@ -1,29 +1,23 @@
-"""Main FastAPI application module."""
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from app.models import TaskRequest, TaskResponse, TaskList
-from app.task_manager import TaskManager
+"""Main aiohttp application module."""
 import asyncio
 import logging
 from typing import Dict
-
-# 设置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Create FastAPI app
-app = FastAPI(
-    title="FastAPI Multi-Process Agent",
-    description="A service using FastAPI as HTTP server and uActor for long-running tasks",
-    version="0.1.0",
+from aiohttp import web
+from app.routes import (
+    create_task,
+    list_tasks,
+    get_task,
+    terminate_task,
+    task_manager
 )
 
-# Create task manager
-task_manager = TaskManager()
+# 设置日志
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 
 # 定期任务，每10秒打印所有任务状态
-
-
 async def print_tasks_status():
     """定期打印所有任务状态的后台任务"""
     while True:
@@ -40,62 +34,41 @@ async def print_tasks_status():
         await asyncio.sleep(10)
 
 
-@app.on_event("startup")
-async def start_scheduler():
+async def start_background_tasks(app):
     """启动应用时开始定期任务"""
-    asyncio.create_task(print_tasks_status())
+    app['task_printer'] = asyncio.create_task(print_tasks_status())
 
 
-@app.post("/tasks", response_model=TaskResponse, status_code=201)
-async def create_task(task_request: TaskRequest):
-    """
-    Create a new task that will run in a separate process.
-
-    The task will be executed in a background process using uActor.
-    """
-    task_id = task_manager.create_task(
-        task_request.task_type,
-        task_request.task_data
-    )
-
-    # Return the initial status
-    status = task_manager.get_task_status(task_id)
-    if not status:
-        raise HTTPException(status_code=500, detail="Failed to create task")
-
-    return status
+async def cleanup_background_tasks(app):
+    """关闭应用时清理定期任务"""
+    app['task_printer'].cancel()
+    await app['task_printer']
 
 
-@app.get("/tasks", response_model=TaskList)
-async def list_tasks():
-    """
-    List all tasks and their current statuses.
-    """
-    tasks = task_manager.list_tasks()
-    return {"tasks": tasks}
+def init_app():
+    """初始化aiohttp应用"""
+    app = web.Application()
+
+    # 设置路由
+    app.add_routes([
+        web.post('/tasks', create_task),
+        web.get('/tasks', list_tasks),
+        web.get('/tasks/{task_id}', get_task),
+        web.delete('/tasks/{task_id}', terminate_task),
+    ])
+
+    # 设置启动和关闭回调
+    app.on_startup.append(start_background_tasks)
+    app.on_cleanup.append(cleanup_background_tasks)
+
+    return app
 
 
-@app.get("/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: str):
-    """
-    Get the status of a specific task.
-    """
-    status = task_manager.get_task_status(task_id)
-    if not status:
-        raise HTTPException(
-            status_code=404, detail=f"Task {task_id} not found")
-
-    return status
+def run_app():
+    """运行aiohttp应用"""
+    app = init_app()
+    web.run_app(app, host='0.0.0.0', port=8000)
 
 
-@app.delete("/tasks/{task_id}", response_model=dict)
-async def terminate_task(task_id: str):
-    """
-    Terminate a running task.
-    """
-    success = task_manager.terminate_task(task_id)
-    if not success:
-        raise HTTPException(
-            status_code=404, detail=f"Task {task_id} not found or could not be terminated")
-
-    return {"status": "success", "message": f"Task {task_id} terminated"}
+if __name__ == "__main__":
+    run_app()
